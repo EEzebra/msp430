@@ -7,6 +7,8 @@
 unsigned char Times=0;
 unsigned char Uart1_Buf[Buf1_Max];
 unsigned char PoP = 0;
+unsigned char Uart2_Buf[Buf2_Max];
+unsigned char PoP2 = 0;
 /*RXD1 RESIVE DATA*/
 unsigned char RXData = 0;
 /*RXD2 RESIVE DATA*/
@@ -131,32 +133,27 @@ __interrupt void USCI_A0_ISR(void)
 #pragma vector = USCI_A1_VECTOR
 __interrupt void USCI_A1_ISR(void)
 {
-    u8 R_WEEK[1]={0x00};
     UCA1IFG &=~ UCRXIFG;
     RX2Data = UCA1RXBUF;
-        if(RX2Data==0x0a)
-        {
-            MI2C_ReadRX8025(6,R_WEEK,1);
-            UCA1TXBUF = R_WEEK[0];
-            MI2C_ReadRX8025(5,R_WEEK,1);
-            UCA1TXBUF = R_WEEK[0];
-            MI2C_ReadRX8025(4,R_WEEK,1);
-            UCA1TXBUF = R_WEEK[0];
-            MI2C_ReadRX8025(3,R_WEEK,1);
-            UCA1TXBUF = R_WEEK[0];
-            MI2C_ReadRX8025(2,R_WEEK,1);
-            UCA1TXBUF = R_WEEK[0];
-            MI2C_ReadRX8025(1,R_WEEK,1);
-            UCA1TXBUF = R_WEEK[0];
-            MI2C_ReadRX8025(0,R_WEEK,1);
-            UCA1TXBUF = R_WEEK[0];
-            UCA1TXBUF = 0X0D;
-        }
+    //    UCA1TXBUF = RXData;
+//将接收到的字符串存到缓存中
+    Uart2_Buf[PoP2] = RX2Data;
+//缓存指针向后移动
+    PoP2++;
+    if(RX2Data==0x0a)
+    {
+        word_check();
+    }
+//如果缓存满,将缓存指针指向缓存的首地址  
+    if(PoP2 > Buf2_Max)
+    {
+        PoP2 = 0;
+    }
 }
 
 
 /****************************************************************************
-* 名    称：
+* 名    称：U1
 * 功    能：发送一个byte字节
 * 入口参数：
 * 出口参数：
@@ -173,8 +170,27 @@ void Send_serial_1byte(unsigned char TXData)
     UCA0IFG &= ~UCTXIFG;
 }
 
+
 /****************************************************************************
-* 名    称：
+* 名    称：U2
+* 功    能：发送一个byte字节
+* 入口参数：
+* 出口参数：
+* 说    明：
+***************************************************************************/
+
+void Send_seria2_1byte(unsigned char TXData)
+{ 
+
+//将发送数据放入U1缓存中
+    UCA1TXBUF = TXData;
+//等待数据发送完成
+    while(!(UCA1IFG & UCTXIFG));
+    UCA1IFG &= ~UCTXIFG;
+}
+
+/****************************************************************************
+* 名    称：U1
 * 功    能：发送一个字符串
 * 入口参数：
 * 出口参数：
@@ -188,6 +204,23 @@ void UART1_SendString(char *s)
         Send_serial_1byte(*s++);//发送当前字符
     }
 }
+
+/****************************************************************************
+* 名    称：U2
+* 功    能：发送一个字符串
+* 入口参数：
+* 出口参数：
+* 说    明：
+***************************************************************************/
+void UART2_SendString(char *s)
+{
+//检测字符串结束符
+    while(*s)
+    {
+        Send_seria2_1byte(*s++);//发送当前字符
+    }
+}
+
 
 /****************************************************************************
 * 名    称：
@@ -361,4 +394,144 @@ void PWRkey(void)
 /*等待SIM卡注册完成大概5秒左右*/
     PWRSET_0
     delay_s(10);
+}
+
+
+
+/****************************************************************************
+* 名    称：
+* 功    能：清除缓存
+* 入口参数：
+* 出口参数：
+* 说    明：
+***************************************************************************/
+void CLR_Buf2(void)
+{
+    u16 k;
+    for(k=0;k<Buf2_Max;k++)      //将缓存内容清零
+    {
+        Uart2_Buf[k] = 0x00;
+    }
+    PoP2 = 0;              //接收字符串的起始存储位置
+}
+
+/****************************************************************************
+* 名    称：
+* 功    能：串口字符功能检测
+* 入口参数：Uart1_Buf
+* 出口参数：
+* 说    明：
+***************************************************************************/
+void word_check(void)
+{
+    unsigned int v;
+    unsigned char str1[Buf2_Max];
+
+    if(Uart2_Buf[0] == '+')
+    {
+        if(Uart2_Buf[2] == ' ')
+        {
+            for(v=0;v<(Buf2_Max-4);v++)//截取实际字段
+            {
+                str1[v]=Uart2_Buf[v+4];
+            }
+            switch(Uart2_Buf[3])
+            {
+                case 0x41:reset_eerom();break;
+                case 0x42:break;
+                case 0x43:readdata_eerom();break;
+                case 0x44:addslave_eerom(str1);break;
+                case 0x45:;break;
+                case 0x46:writeadd_eerom(str1);break;
+                default:break;
+            }
+        }
+    }
+    
+    /*字段检测完成清空缓存*/
+    CLR_Buf2();
+
+}
+
+/****************************************************************************
+* 名    称：
+* 功    能：EEPROM擦出全写0
+* 入口参数：reset_eerom
+* 出口参数：
+* 说    明：
+***************************************************************************/
+void reset_eerom(void)
+{
+    unsigned char claer[40]={0x00};
+    for(v=0;v<Buf_MAX;v++)
+    {
+        M_A=v*40+Base_add;
+        M_H=M_A>>8;
+        M_L=(M_A&0x00ff);
+        
+        MI2C_Write24C32(M_H,M_L,claer,40)
+        UART0_SendString(rs);
+    }
+}
+
+/****************************************************************************
+* 名    称：
+* 功    能：读取数据
+* 入口参数：Uart1_Buf
+* 出口参数：
+* 说    明：
+***************************************************************************/
+void readdata_eerom(void)
+{
+    unsigned int v;
+    unsigned int M_A;
+    unsigned char M_H,M_L;
+    //主机编号1位//主机数量1位//联系方式11位
+    unsigned char Master[13];
+    unsigned char rs[Buf_MAX];
+    MI2C_Read24C32(0X00,0X05,Master,13);
+    
+    for(v=0;v<Master[1];v++)
+    {
+        M_A=v*40+Base_add;
+        M_H=M_A>>8;
+        M_L=(M_A&0x00ff);
+        
+        MI2C_Read24C32(M_H,M_L,rs,40)
+        UART0_SendString(rs);
+    }
+}
+
+/****************************************************************************
+* 名    称：
+* 功    能：添加分机
+* 入口参数：Uart1_Buf
+* 出口参数：
+* 说    明：
+***************************************************************************/
+void addslave_eerom(unsigned char *rs)
+{
+    unsigned int M_A;
+    unsigned char M_H,M_L;
+    M_A=rs[0]*40+Base_add;
+    M_H=M_A>>8;
+    M_L=(M_A&0x00ff);
+    MI2C_Write24C32(M_H,M_L,rs,40);
+}
+
+//void delslave_eerom(void)
+//{
+//    
+//}
+
+/****************************************************************************
+* 名    称：
+* 功    能：写主机
+* 入口参数：Uart1_Buf
+* 出口参数：
+* 说    明：
+***************************************************************************/
+void writeadd_eerom(unsigned char *rs)
+{
+    MI2C_Write24C32(0x00,0x05,rs,13);
 }
