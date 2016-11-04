@@ -3,6 +3,7 @@
 #include"string.h"
 #include"Delay.h"
 #include"i2c.h"
+#include"AT24C32.h"
 
 unsigned char Times=0;
 unsigned char Uart1_Buf[Buf1_Max];
@@ -196,7 +197,7 @@ void Send_seria2_1byte(unsigned char TXData)
 * 出口参数：
 * 说    明：
 ***************************************************************************/
-void UART1_SendString(char *s)
+void UART1_SendString(unsigned char *s)
 {
 //检测字符串结束符
     while(*s)
@@ -212,12 +213,12 @@ void UART1_SendString(char *s)
 * 出口参数：
 * 说    明：
 ***************************************************************************/
-void UART2_SendString(char *s)
+void UART2_SendString(unsigned char *ss)
 {
 //检测字符串结束符
-    while(*s)
+    while(*ss)
     {
-        Send_seria2_1byte(*s++);//发送当前字符
+        Send_seria2_1byte(*ss++);//发送当前字符
     }
 }
 
@@ -431,17 +432,17 @@ void word_check(void)
     {
         if(Uart2_Buf[2] == ' ')
         {
-            for(v=0;v<(Buf2_Max-4);v++)//截取实际字段
+            for(v=0;v<(Buf2_Max-3);v++)//截取实际字段
             {
-                str1[v]=Uart2_Buf[v+4];
+                str1[v]=Uart2_Buf[v+3];
             }
-            switch(Uart2_Buf[3])
+            switch(Uart2_Buf[1])
             {
                 case 0x41:reset_eerom();break;
                 case 0x42:break;
                 case 0x43:readdata_eerom();break;
                 case 0x44:addslave_eerom(str1);break;
-                case 0x45:;break;
+                case 0x45:delslave_eerom();break;
                 case 0x46:writeadd_eerom(str1);break;
                 default:break;
             }
@@ -462,16 +463,23 @@ void word_check(void)
 ***************************************************************************/
 void reset_eerom(void)
 {
-    unsigned char claer[40]={0x00};
-    for(v=0;v<Buf_MAX;v++)
+    unsigned int v = 0;
+    unsigned int C_A = 0;
+    unsigned char clear[DATA_MAXBYTES] = {0};
+    unsigned char slave_clear[1] = {0};//分机数量
+    unsigned char slave_num[1] = {0};//分机数量
+    
+    for(v = 0;v < SLAVE_MAX;v++)
     {
-        M_A=v*40+Base_add;
-        M_H=M_A>>8;
-        M_L=(M_A&0x00ff);
-        
-        MI2C_Write24C32(M_H,M_L,claer,40)
-        UART0_SendString(rs);
+        C_A = (v * DATA_MAXBYTES) + DATA_BASE_ADD;
+
+        EepromWrite(clear,DATA_MAXBYTES,C_A);
     }
+    
+    EepromWrite(slave_clear,1,SLAVE_NUMBER_ADD);
+    
+    EepromRead(slave_num,1,SLAVE_NUMBER_ADD); //读取分机数量
+    UART2_SendString(slave_num);
 }
 
 /****************************************************************************
@@ -486,43 +494,87 @@ void readdata_eerom(void)
     unsigned int v;
     unsigned int M_A;
     unsigned char M_H,M_L;
-    //主机编号1位//主机数量1位//联系方式11位
-    unsigned char Master[13];
-    unsigned char rs[Buf_MAX];
-    MI2C_Read24C32(0X00,0X05,Master,13);
+    //主机编号1位//联系方式11位//位置地址20位
+    unsigned char Master[DATA_MAXBYTES];
+    unsigned char rs1[DATA_MAXBYTES];
+    unsigned char slave_num[1]={0x00};//分机数量
+    unsigned char slave_num0=0;
+
+    EepromRead(Master,32,DATA_BASE_ADD);//读取主机信息
+    UART2_SendString(Master);//发送主机信息  
     
-    for(v=0;v<Master[1];v++)
+    EepromRead(slave_num,1,SLAVE_NUMBER_ADD); //读取分机数量
+    slave_num0=slave_num[0];
+    Send_seria2_1byte(slave_num[0]);
+    
+    for(v=0;v<slave_num0;v++)//发送分机信息
     {
-        M_A=v*40+Base_add;
+        M_A=(v*40)+0x28+DATA_BASE_ADD;
         M_H=M_A>>8;
-        M_L=(M_A&0x00ff);
+        M_L=M_A&0xFF;
+        Send_seria2_1byte(M_H);
+        Send_seria2_1byte(M_L);
         
-        MI2C_Read24C32(M_H,M_L,rs,40)
-        UART0_SendString(rs);
+        EepromRead(rs1,DATA_MAXBYTES,M_A);
+        UART2_SendString(rs1);
     }
 }
 
 /****************************************************************************
 * 名    称：
 * 功    能：添加分机
-* 入口参数：Uart1_Buf
+* 入口参数：rs0
 * 出口参数：
 * 说    明：
 ***************************************************************************/
-void addslave_eerom(unsigned char *rs)
+void addslave_eerom(unsigned char *rs0)
 {
-    unsigned int M_A;
-    unsigned char M_H,M_L;
-    M_A=rs[0]*40+Base_add;
-    M_H=M_A>>8;
-    M_L=(M_A&0x00ff);
-    MI2C_Write24C32(M_H,M_L,rs,40);
+    unsigned int S_A;
+    unsigned char slave_num[1]={0x00};//分机数量
+    unsigned char slave_num0=0;
+    
+    /*读取分机数量并且加1*/
+    EepromRead(slave_num,1,SLAVE_NUMBER_ADD);
+    if(slave_num[0] <= SLAVE_MAX)          //少于50抬
+    {
+        slave_num[0]++;
+    }
+    EepromWrite(slave_num,1,SLAVE_NUMBER_ADD);
+    slave_num0=slave_num[0];
+    
+    /*按照地址写入数据*/
+    S_A=(slave_num0 * DATA_MAXBYTES) + DATA_BASE_ADD;
+    EepromWrite(rs0,strlen(rs0),S_A);
+    
 }
 
-//void delslave_eerom(void)
-//{
-//    
-//}
+/****************************************************************************
+* 名    称：
+* 功    能：删除最近一台分机信息
+* 入口参数：
+* 出口参数：
+* 说    明：
+***************************************************************************/
+void delslave_eerom(void)
+{
+    unsigned int S_A;
+    unsigned char slave_num[1]={0x00};//分机数量
+    unsigned char slave_num0=0;
+    unsigned char claer[DATA_MAXBYTES] = {0};
+    
+    /*读取分机数量并且加1*/
+    EepromRead(slave_num,1,SLAVE_NUMBER_ADD);
+    if(slave_num[0] > 0)          //少于50抬
+    {
+        slave_num0=slave_num[0];
+        /*按照地址写入数据*/
+        S_A=(slave_num0 * DATA_MAXBYTES) + DATA_BASE_ADD;
+        EepromWrite(claer,DATA_MAXBYTES,S_A);
+    
+        slave_num[0]--;
+        EepromWrite(slave_num,1,SLAVE_NUMBER_ADD);
+    }
+}
 
 /****************************************************************************
 * 名    称：
@@ -533,5 +585,7 @@ void addslave_eerom(unsigned char *rs)
 ***************************************************************************/
 void writeadd_eerom(unsigned char *rs)
 {
-    MI2C_Write24C32(0x00,0x05,rs,13);
+    //主机编号1位//联系方式11位//位置地址20位
+    EepromWrite(rs,32,DATA_BASE_ADD);
 }
+
