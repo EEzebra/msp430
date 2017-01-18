@@ -73,3 +73,19 @@ http://www.w3school.com.cn/         网页WEB技术
 http://www.bootcss.com/   bootstrap网页开发工具
 
 http://blog.studygolang.com/category/go%E5%AE%9E%E6%88%98/        百度go 实战
+
+https://blog.yuanbin.me/posts/2014/02/raspberry-for-fun-start.html
+低功耗(10W不到)的树莓派放在寝室当然不会有什么罪恶感，一个月的电费也没几块不是。计划在树莓派上要跑的服务有：
+无线AP——当无线路由器用，AUR中的create_ap Done
+Squid代理——提供寝室网络&校外同学下载交大学术/PT资源
+G.o.a.g^en.t代%理——学术用途… Done
+FTP——vsftp
+媒体中心——minidlna
+VPN
+外接红外模块以供手机远程控制寝室空调
+BT下载机——transmission-cli
+Coursera/edx 视频课件下载中心——Python脚本
+文件共享——samba
+云同步中心——seafile
+网站测试
+…
