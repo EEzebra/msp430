@@ -1,28 +1,14 @@
-#include<msp430FR5725.h>
 #include"RS232.h"
-#include"string.h"
-#include"Delay.h"
-#include"i2c.h"
-#include"AT24C32.h"
 
-unsigned char Times=0;
 unsigned char Uart1_Buf[Buf1_Max];
-unsigned char PoP = 0;
 unsigned char Uart2_Buf[Buf2_Max];
-unsigned char PoP2 = 0;
 /*RXD1 RESIVE DATA*/
 unsigned char RXData = 0;
 /*RXD2 RESIVE DATA*/
 unsigned char RX2Data = 0;
-
-
-//    unsigned char TXTData=0;
-//    unsigned char check=0;
-static unsigned char *content="0891683108501705F011000D9168\
-                               5127866143F00008AA0C6D4B8BD5\
-                               5DF27ECF5B8C6210";
-
-
+unsigned char PoP = 0;
+unsigned char PoP2 = 0;
+unsigned char Times = 0;
 
 /****************************************************************************
 * 名    称：Uart1_init()
@@ -333,8 +319,9 @@ void Set_Pdu_Mode(void)
 ***************************************************************************/
 void Send_Pdu_Sms(void)
 {
+    unsigned char *content="0891683108501705F011000D91685127866143F00008AA0C6D4B8BD55DF27ECF5B8C6210";
 //发送数据长度：27（具体的计算方法看串口调试比较）接收到“>”才发送短信内容
-    Second_AT_Command("AT+CMGS=31",">",3); 
+    Second_AT_Command("AT+CMGS=27",">",3); 
     UART1_SendString(content);
     delay(50);
 //发送结束符
@@ -353,6 +340,8 @@ void Wait_CREG(void)
 {
     u8 i;
     u8 k;
+    u8 v;
+    v = 0;
     i = 0;
     CLR_Buf1();                 
     while(i == 0)        			
@@ -373,6 +362,11 @@ void Wait_CREG(void)
                     break;
                 }
             }
+        }
+        v++;
+        if(v>10)
+        {
+            PWRkey();
         }
     }
 }
@@ -438,12 +432,17 @@ void word_check(void)
             }
             switch(Uart2_Buf[1])
             {
-                case 0x41:reset_eerom();break;
-                case 0x42:break;
-                case 0x43:readdata_eerom();break;
-                case 0x44:addslave_eerom(str1);break;
-                case 0x45:delslave_eerom();break;
-                case 0x46:writeadd_eerom(str1);break;
+                case 0x41:reset_eerom();break;              //+Aspace
+                case 0x42:addphone_eerom(str1);break;       //+Bspace
+                case 0x43:readdata_eerom();break;           //+Cspace
+                case 0x44:addslave_eerom(str1);break;       //+Dspace
+                case 0x45:delslave_eerom();break;           //+Espace
+                case 0x46:writeadd_eerom(str1);break;       //+Fspace
+                case 0x47:send_sms();break;                 //+Gspace
+                case 0x48:call_slav(str1);break;            //+Hspace
+                case 0x49:time_syn(str1);break;             //+Ispace
+                case 0x4A:writename_eerom(str1);break;      //+Jspace
+                case 0x4B:addphoneC_eerom(str1);break;      //+Kspace
                 default:break;
             }
         }
@@ -467,25 +466,79 @@ void reset_eerom(void)
     unsigned int C_A = 0;
     unsigned char clear[DATA_MAXBYTES] = {0};
     unsigned char slave_clear[1] = {0};//分机数量
-    unsigned char slave_num[1] = {0};//分机数量
     
-    for(v = 0;v < SLAVE_MAX;v++)
+    for(v = 0;v < (SLAVE_MAX + 4);v++)
     {
         C_A = (v * DATA_MAXBYTES) + DATA_BASE_ADD;
-
         EepromWrite(clear,DATA_MAXBYTES,C_A);
     }
     
     EepromWrite(slave_clear,1,SLAVE_NUMBER_ADD);
+    EepromWrite(slave_clear,1,HPHONE_NUMBER_ADD);
+    EepromWrite(slave_clear,1,CPHONE_NUMBER_ADD);
     
-    EepromRead(slave_num,1,SLAVE_NUMBER_ADD); //读取分机数量
-    UART2_SendString(slave_num);
+    LEDY_Flash();
+}
+
+/****************************************************************************
+* 名    称：
+* 功    能：添加高优先级电话号
+* 入口参数：rs1
+* 出口参数：
+* 说    明：
+***************************************************************************/
+void addphone_eerom(unsigned char *rs1)
+{
+    unsigned int S_A;
+    unsigned char phone_num[1]={0x00};//数量
+    unsigned char phone_num0=0;
+    
+    /*读取分机数量并且加1*/
+    EepromRead(phone_num,1,HPHONE_NUMBER_ADD);
+    if(phone_num[0] <= PHONE_MAX)          //少于5抬
+    {
+        phone_num[0]++;
+    }
+    EepromWrite(phone_num,1,HPHONE_NUMBER_ADD);
+    phone_num0=phone_num[0];
+    
+    /*按照地址写入数据*/
+    S_A=((phone_num0-1) * PHONE_BYTES) + DATA_HOMEP;
+    EepromWrite(rs1,strlen(rs1),S_A);
+    
+}
+
+/****************************************************************************
+* 名    称：
+* 功    能：添加低优先级电话号
+* 入口参数：rs2
+* 出口参数：
+* 说    明：
+***************************************************************************/
+void addphoneC_eerom(unsigned char *rs2)
+{
+    unsigned int S_A;
+    unsigned char phone_num[1]={0x00};//数量
+    unsigned char phone_num0=0;
+    
+    /*读取分机数量并且加1*/
+    EepromRead(phone_num,1,CPHONE_NUMBER_ADD);
+    if(phone_num[0] <= PHONE_MAX)          //少于5抬
+    {
+        phone_num[0]++;
+    }
+    EepromWrite(phone_num,1,CPHONE_NUMBER_ADD);
+    phone_num0=phone_num[0];
+    
+    /*按照地址写入数据*/
+    S_A=((phone_num0-1) * PHONE_BYTES) + DATA_CUSTP;
+    EepromWrite(rs2,strlen(rs2),S_A);
 }
 
 /****************************************************************************
 * 名    称：
 * 功    能：读取数据
-* 入口参数：Uart1_Buf
+* 入口参数：void
 * 出口参数：
 * 说    明：
 ***************************************************************************/
@@ -493,30 +546,49 @@ void readdata_eerom(void)
 {
     unsigned int v;
     unsigned int M_A;
-    unsigned char M_H,M_L;
-    //主机编号1位//联系方式11位//位置地址20位
     unsigned char Master[DATA_MAXBYTES];
-    unsigned char rs1[DATA_MAXBYTES];
+    unsigned char reg[PHONE_BYTES];
     unsigned char slave_num[1]={0x00};//分机数量
     unsigned char slave_num0=0;
 
-    EepromRead(Master,32,DATA_BASE_ADD);//读取主机信息
-    UART2_SendString(Master);//发送主机信息  
+    /*读取主机信息*/
+    EepromRead(Master,DATA_MAXBYTES,DATA_BASE_ADD);
+    UART2_SendString(Master);//发送主机信息
+    /*读取主机信息*/
+    EepromRead(Master,DATA_MAXBYTES,DATA_M_ADD);
+    UART2_SendString(Master);//发送主机信息
     
-    EepromRead(slave_num,1,SLAVE_NUMBER_ADD); //读取分机数量
+    /*读取H电话数量*/
+    EepromRead(slave_num,1,HPHONE_NUMBER_ADD);
+    slave_num0=slave_num[0];
+    Send_seria2_1byte(slave_num[0]);  
+    for(v=0;v<slave_num0;v++)//发送电话信息
+    {
+        M_A=(v*PHONE_BYTES)+DATA_HOMEP;  
+        EepromRead(reg,PHONE_BYTES,M_A);
+        UART2_SendString(reg);
+    }
+    
+    /*读取C电话数量*/
+    EepromRead(slave_num,1,CPHONE_NUMBER_ADD);
     slave_num0=slave_num[0];
     Send_seria2_1byte(slave_num[0]);
+    for(v=0;v<slave_num0;v++)//发送电话信息
+    {
+        M_A=(v*PHONE_BYTES)+DATA_CUSTP;
+        EepromRead(reg,PHONE_BYTES,M_A);
+        UART2_SendString(reg);
+    }
     
+    /*读取分机数量*/
+    EepromRead(slave_num,1,SLAVE_NUMBER_ADD);
+    slave_num0=slave_num[0];
+    Send_seria2_1byte(slave_num[0]);
     for(v=0;v<slave_num0;v++)//发送分机信息
     {
-        M_A=(v*40)+0x28+DATA_BASE_ADD;
-        M_H=M_A>>8;
-        M_L=M_A&0xFF;
-        Send_seria2_1byte(M_H);
-        Send_seria2_1byte(M_L);
-        
-        EepromRead(rs1,DATA_MAXBYTES,M_A);
-        UART2_SendString(rs1);
+        M_A=(v*DATA_MAXBYTES)+DATA_S_ADD;
+        EepromRead(Master,DATA_MAXBYTES,M_A);
+        UART2_SendString(Master);
     }
 }
 
@@ -543,7 +615,7 @@ void addslave_eerom(unsigned char *rs0)
     slave_num0=slave_num[0];
     
     /*按照地址写入数据*/
-    S_A=(slave_num0 * DATA_MAXBYTES) + DATA_BASE_ADD;
+    S_A=((slave_num0 - 1) * DATA_MAXBYTES) + DATA_S_ADD;
     EepromWrite(rs0,strlen(rs0),S_A);
     
 }
@@ -568,9 +640,9 @@ void delslave_eerom(void)
     {
         slave_num0=slave_num[0];
         /*按照地址写入数据*/
-        S_A=(slave_num0 * DATA_MAXBYTES) + DATA_BASE_ADD;
+        S_A=((slave_num0 - 1) * DATA_MAXBYTES) + DATA_S_ADD;
         EepromWrite(claer,DATA_MAXBYTES,S_A);
-    
+        /*写入分机数量*/
         slave_num[0]--;
         EepromWrite(slave_num,1,SLAVE_NUMBER_ADD);
     }
@@ -585,7 +657,82 @@ void delslave_eerom(void)
 ***************************************************************************/
 void writeadd_eerom(unsigned char *rs)
 {
-    //主机编号1位//联系方式11位//位置地址20位
-    EepromWrite(rs,32,DATA_BASE_ADD);
+    //主机编号1位//公司名称39位//位置地址40位
+    EepromWrite(rs,DATA_MAXBYTES,DATA_BASE_ADD);
+}
+void writename_eerom(unsigned char *rsn)
+{
+    EepromWrite(rsn,DATA_MAXBYTES,DATA_M_ADD);
+}
+
+/****************************************************************************
+* 名    称：
+* 功    能：写主机
+* 入口参数：Uart1_Buf
+* 出口参数：
+* 说    明：
+***************************************************************************/
+void send_sms(void)
+{
+    unsigned char *content="0891683108501705F011000D91685127866143F00008AA0C6D4B8BD55DF27ECF5B8C6210";
+    Wait_CREG();          //确认注册成功
+    Set_Pdu_Mode();       //设置Pdu模式
+    Second_AT_Command("AT+CMGS=27",">",3);
+    UART1_SendString(content);
+    Send_serial_1byte(0X1A);;
+}
+
+/****************************************************************************
+* 名    称：call_slav
+* 功    能：访问从机
+* 入口参数：code string类型
+* 出口参数：
+* 说    明：当从机处于
+***************************************************************************/
+void call_slav(unsigned char *code)
+{
+    unsigned char Txcode[4]={0x0b,0x0a,0xff,0xff};
+    P2IE &= ~BIT3;                                      //有发送短信响应时，关闭中断
+    P2IFG &= ~BIT3;
+    close_Fixed_cycle();
+    
+    Txcode[3]=code[0];
+    halRfSendPacket(Txcode,4);
+    
+    P2IE |= BIT3;                      //打开中断
+    P2IFG &= ~BIT3;
+    StartSRX();
+    Set_Fixed_cycle(0x01);
+}
+
+/****************************************************************************
+* 名    称：time_syn
+* 功    能：同步时间
+* 入口参数：time string类型
+* 出口参数：
+* 说    明：对8025进行写操作
+***************************************************************************/
+void time_syn(unsigned char *time)
+{
+    
+    unsigned char time0[1];
+    UART2_SendString(time);
+    
+    time0[0]=((time[10]-0x30)<<4)+(time[11]-0x30);
+    MI2C_WriteRX8025(0x00,time0,1);
+    time0[0]=((time[8]-0x30)<<4)+(time[9]-0x30);
+    MI2C_WriteRX8025(0x01,time0,1);  //1
+    time0[0]=((time[6]-0x30)<<4)+(time[7]-0x30);
+    MI2C_WriteRX8025(0x02,time0,1);  //2
+    time0[0]=0x02;
+    MI2C_WriteRX8025(0x03,time0,1);
+    time0[0]=((time[4]-0x30)<<4)+(time[5]-0x30);
+    MI2C_WriteRX8025(0x04,time0,1);
+    time0[0]=((time[2]-0x30)<<4)+(time[3]-0x30);
+    MI2C_WriteRX8025(0x05,time0,1);
+    time0[0]=((time[0]-0x30)<<4)+(time[1]-0x30);
+    MI2C_WriteRX8025(0x06,time0,1);
+    
+    LEDY_Flash();
 }
 
